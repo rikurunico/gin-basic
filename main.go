@@ -1,103 +1,148 @@
 package main
 
 import (
-	"net/http"
-	"strconv"
+	"fmt"
+	"log"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
+	"github.com/spf13/viper"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 type Quote struct {
-	ID     string `json:"id"`
-	Text   string `json:"text"`
-	Author string `json:"author"`
+	gorm.Model
+	Text   string
+	Author string
 }
+
+var (
+	db *gorm.DB
+)
 
 var quotes = []Quote{
-	{ID: "1", Text: "Keep calm and code on", Author: "Unknown"},
-	{ID: "2", Text: "Talk is cheap, show me the code", Author: "Linus Torvalds"},
-	{ID: "3", Text: "Any fool can write code that a computer can understand. Good programmers write code that humans can understand.", Author: "Martin Fowler"},
-	{ID: "4", Text: "Programs must be written for people to read, and only incidentally for machines to execute.", Author: "Harold Abelson and Gerald Jay Sussman"},
-	{ID: "5", Text: "The only way to do great work is to love what you do.", Author: "Steve Jobs"},
-	{ID: "6", Text: "The best way to predict the future is to invent it.", Author: "Alan Kay"},
-	{ID: "7", Text: "Quality is not an act, it is a habit.", Author: "Aristotle"},
-	{ID: "8", Text: "It's not that I'm so smart, it's just that I stay with problems longer.", Author: "Albert Einstein"},
-	{ID: "9", Text: "In order to be irreplaceable, one must always be different.", Author: "Coco Chanel"},
-}
-
-func getQuotes(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"data": quotes})
-}
-
-func getQuoteByID(c *gin.Context) {
-	id := c.Param("id")
-	for _, q := range quotes {
-		if q.ID == id {
-			c.JSON(http.StatusOK, gin.H{"data": q})
-			return
-		}
-	}
-	c.JSON(http.StatusNotFound, gin.H{"error": "quote not found"})
-}
-
-func createQuote(c *gin.Context) {
-	var input Quote
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	newQuote := Quote{
-		ID:     strconv.Itoa(len(quotes) + 1),
-		Text:   input.Text,
-		Author: input.Author,
-	}
-	quotes = append(quotes, newQuote)
-	c.JSON(http.StatusCreated, gin.H{"data": newQuote})
-}
-
-func updateQuote(c *gin.Context) {
-	id := c.Param("id")
-	var input Quote
-	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	for i, q := range quotes {
-		if q.ID == id {
-			quotes[i] = Quote{
-				ID:     q.ID,
-				Text:   input.Text,
-				Author: input.Author,
-			}
-			c.JSON(http.StatusOK, gin.H{"data": quotes[i]})
-			return
-		}
-	}
-	c.JSON(http.StatusNotFound, gin.H{"error": "quote not found"})
-}
-
-func deleteQuote(c *gin.Context) {
-	id := c.Param("id")
-	for i, q := range quotes {
-		if q.ID == id {
-			quotes = append(quotes[:i], quotes[i+1:]...)
-			c.JSON(http.StatusOK, gin.H{"data": "quote deleted"})
-			return
-		}
-	}
-	c.JSON(http.StatusNotFound, gin.H{"error": "quote not found"})
+	{Text: "Keep calm and code on", Author: "Unknown"},
+	{Text: "Talk is cheap, show me the code", Author: "Linus Torvalds"},
+	{Text: "Premature optimization is the root of all evil", Author: "Donald Knuth"},
+	{Text: "Any fool can write code that a computer can understand. Good programmers write code that humans can understand.", Author: "Martin Fowler"},
+	{Text: "Programs must be written for people to read, and only incidentally for machines to execute.", Author: "Harold Abelson"},
 }
 
 func main() {
-	r := gin.Default()
+	// Load configuration from .env file
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
 
+	// Read configuration using viper
+	viper.SetConfigFile(".env")
+	viper.AutomaticEnv()
+	err = viper.ReadInConfig()
+	if err != nil {
+		log.Fatal("Error reading .env file")
+	}
+
+	// Get database configuration values
+	dbUser := viper.GetString("DB_USER")
+	dbPassword := viper.GetString("DB_PASSWORD")
+	dbHost := viper.GetString("DB_HOST")
+	dbPort := viper.GetString("DB_PORT")
+	dbName := viper.GetString("DB_NAME")
+
+	// Create DSN string and connect to database
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local", dbUser, dbPassword, dbHost, dbPort, dbName)
+	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("Error connecting to the database: %v", err)
+	}
+
+	// Auto migrate schema
+	err = db.AutoMigrate(&Quote{})
+	if err != nil {
+		log.Fatalf("Error migrating schema: %v", err)
+	}
+
+	// Seed the database
+	for _, quote := range quotes {
+		db.Create(&quote)
+	}
+
+	// Start Gin server
+	r := gin.Default()
 	r.GET("/quotes", getQuotes)
 	r.GET("/quotes/:id", getQuoteByID)
 	r.POST("/quotes", createQuote)
 	r.PUT("/quotes/:id", updateQuote)
 	r.DELETE("/quotes/:id", deleteQuote)
-
-	if err := r.Run(":8080"); err != nil {
-		panic(err)
+	err = r.Run(":8080")
+	if err != nil {
+		log.Fatalf("Error starting Gin server: %v", err)
 	}
+}
+
+func getQuotes(c *gin.Context) {
+	var quotes []Quote
+	db.Find(&quotes)
+
+	c.JSON(200, quotes)
+}
+
+func getQuoteByID(c *gin.Context) {
+	var quote Quote
+	id := c.Param("id")
+	db.First(&quote, id)
+
+	if quote.ID == 0 {
+		c.JSON(404, gin.H{"message": "quote not found"})
+		return
+	}
+
+	c.JSON(200, quote)
+}
+
+func createQuote(c *gin.Context) {
+	var quote Quote
+	if err := c.ShouldBindJSON(&quote); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	db.Create(&quote)
+
+	c.JSON(201, quote)
+}
+
+func updateQuote(c *gin.Context) {
+	var quote Quote
+	id := c.Param("id")
+
+	if err := db.First(&quote, id).Error; err != nil {
+		c.JSON(404, gin.H{"message": "quote not found"})
+		return
+	}
+
+	if err := c.ShouldBindJSON(&quote); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	db.Save(&quote)
+
+	c.JSON(200, quote)
+}
+
+func deleteQuote(c *gin.Context) {
+	var quote Quote
+	id := c.Param("id")
+
+	if err := db.First(&quote, id).Error; err != nil {
+		c.JSON(404, gin.H{"message": "quote not found"})
+		return
+	}
+
+	db.Delete(&quote)
+
+	c.JSON(200, gin.H{"message": "quote deleted"})
 }
