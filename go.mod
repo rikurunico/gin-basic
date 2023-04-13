@@ -1,4 +1,4 @@
-module golang-api
+module github.com/rikurunico/gin-basic
 
 go 1.20
 
