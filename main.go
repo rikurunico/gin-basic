@@ -3,7 +3,7 @@ package main
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/rikurunico/gin-basic/database"
-	"github.com/rikurunico/gin-basic/handler"
+	"github.com/rikurunico/gin-basic/route"
 )
 
 func main() {
@@ -11,11 +11,7 @@ func main() {
 
 	router := gin.Default()
 
-	router.GET("/quotes", handler.GetQuotes)
-	router.GET("/quotes/:id", handler.GetQuoteByID)
-	router.POST("/quotes", handler.CreateQuote)
-	router.PUT("/quotes/:id", handler.UpdateQuote)
-	router.DELETE("/quotes/:id", handler.DeleteQuote)
+	route.SetupRoute(router)
 
 	router.Run(":8080")
 }
